@@ -1,0 +1,66 @@
+- hosts: localhost
+  gather_facts: true
+  become: false
+  tasks:
+  - shell:
+      cmd: terraform output public_ip
+    register: terraform
+
+  - ansible.builtin.debug:
+      var: terraform.stdout
+
+  - name: Update Inventory
+    ansible.builtin.add_host:
+      name: "{{ item }}"
+      groups: app
+      ansible_ssh_private_key_file: jenkins.pem
+      ansible_user: ubuntu
+    loop: "{{ terraform.stdout }}"
+
+  - name: Sleep for 200 seconds and continue with play
+    ansible.builtin.wait_for:
+      timeout: 200
+    delegate_to: localhost
+
+- hosts: app
+  gather_facts: true
+  become: true
+  user: root
+  tasks:
+    - name: Installing Jdk
+      apt:
+        name: openjdk-8-jdk
+        state: present
+        update_cache: yes
+
+    - name: add tomcatuser
+      user:
+        name: tomcat
+        shell: /sbin/nologin
+
+    - name: Downloading package
+      get_url:
+        url: https://archive.apache.org/dist/tomcat/tomcat-7/v7.0.76/bin/apache-tomcat-7.0.76.tar.gz
+        dest: /tmp/
+
+    - name: install
+      unarchive:
+        src: /tmp/apache-tomcat-7.0.76.tar.gz
+        dest: /usr/local
+        remote_src: yes
+
+    - name: make tomcat symbolic
+      file:
+        src: /usr/local/apache-tomcat-7.0.76
+        dest: /usr/local/tomcat7
+        owner: tomcat
+        group: tomcat
+        state: link
+        
+    - name: copying webapp
+      copy:
+        src: ./target/raviLogin-1.0.war
+        dest: /usr/local/tomcat7/webapps/
+    
+    - name: Starting Tomcat
+      shell: nohup /usr/local/apache-tomcat-7.0.76/bin/startup.sh   
